@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务打卡与日记 - Vibe Hub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('task_tracker.static', filename='style.css') }}">
+</head>
+<body>
+<div class="task-tracker-container">
+    <!-- 返回首页 -->
+    <a href="{{ url_for('index') }}" class="back-link">← 返回 Hub 首页</a>
+
+    <h1 class="page-title">✅ 任务打卡与日记</h1>
+
+    <!-- Tab 切换 -->
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-daily">📋 今日打卡</button>
+        <button class="tab-btn" data-tab="tab-manage">⚙️ 任务管理</button>
+    </div>
+
+    <!-- ========== Tab 1：今日打卡 ========== -->
+    <div id="tab-daily" class="tab-content active">
+        <div class="daily-header">
+            <span class="today-label">📅 <span id="today-date"></span></span>
+            <button class="btn btn-refresh" onclick="loadTodayTasks()">🔄 刷新</button>
+        </div>
+
+        <!-- 今日任务列表 -->
+        <div id="today-task-list" class="task-list">
+            <p class="empty-hint">加载中…</p>
+        </div>
+
+        <!-- 全局随笔区 -->
+        <div class="notes-section">
+            <label for="daily-notes">📝 今日随笔与饮食记录</label>
+            <textarea id="daily-notes" rows="5" placeholder="记录全天的感受、三餐、总结…"></textarea>
+        </div>
+
+        <!-- 生成按钮 -->
+        <button class="btn btn-generate" onclick="generateMarkdown()">✨ 生成 Markdown</button>
+    </div>
+
+    <!-- ========== Tab 2：任务管理 ========== -->
+    <div id="tab-manage" class="tab-content">
+        <!-- 添加任务表单 -->
+        <div class="add-task-form">
+            <h3>➕ 添加新任务</h3>
+            <div class="form-row">
+                <input type="text" id="new-task-name" placeholder="任务名称（如：力量锻炼）" maxlength="100">
+                <input type="number" id="new-task-cycle" placeholder="周期天数" min="1" value="1" style="width:100px;">
+                <button class="btn btn-add" onclick="addTask()">添加</button>
+            </div>
+            <p class="form-hint">周期为 1 = 每天，周期为 7 = 每周。起始日自动设为今天。</p>
+        </div>
+
+        <!-- 已有任务列表 -->
+        <h3>📃 所有任务</h3>
+        <div id="all-task-list" class="task-list">
+            <p class="empty-hint">加载中…</p>
+        </div>
+    </div>
+</div>
+
+<!-- ========== Markdown 预览模态框 ========== -->
+<div id="md-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>📄 生成的 Markdown</h3>
+            <button class="btn-close" onclick="closeModal()">✕</button>
+        </div>
+        <pre id="md-output" class="md-preview"></pre>
+        <div class="modal-footer">
+            <button class="btn btn-copy" onclick="copyMarkdown()">📋 一键复制</button>
+            <button class="btn btn-close-secondary" onclick="closeModal()">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- 操作反馈 Toast -->
+<div id="toast" class="toast" style="display:none;"></div>
+
+<script>
+// ─── URL 常量（由 Jinja2 渲染，兼容反向代理） ──────────────────────────────────────
+const API = {
+    tasks:     "{{ url_for('task_tracker.list_tasks') }}",
+    today:     "{{ url_for('task_tracker.today_tasks') }}",
+    generate:  "{{ url_for('task_tracker.generate_markdown') }}",
+};
+
+// ─── 工具函数 ────────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.className = 'toast toast-' + type;
+    toast.style.display = 'block';
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => { toast.style.display = 'none'; }, 2500);
+}
+
+async function apiFetch(url, opts = {}) {
+    const res = await fetch(url, opts);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '请求失败');
+    return data;
+}
+
+// ─── 日期格式化 ──────────────────────────────────────────────────────────────────
+function todayISO() {
+    const d = new Date();
+    return d.getFullYear() + '-' +
+        String(d.getMonth() + 1).padStart(2, '0') + '-' +
+        String(d.getDate()).padStart(2, '0');
+}
+
+function formatDateCN(iso) {
+    const parts = iso.split('-');
+    return parts[0] + '年' + parseInt(parts[1]) + '月' + parseInt(parts[2]) + '日';
+}
+
+// ─── Tab 切换 ──────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+    });
+});
+
+// ─── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg, type) {
+    type = type || 'success';
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast toast-' + type;
+    el.style.display = 'block';
+    clearTimeout(el._timer);
+    el._timer = setTimeout(function(){ el.style.display = 'none'; }, 2500);
+}
+
+// ─── 模态框 ─────────────────────────────────────────────────────────────────────
+function closeModal() {
+    document.getElementById('md-modal').style.display = 'none';
+}
+
+async function copyMarkdown() {
+    const text = document.getElementById('md-output').textContent;
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast('✅ 已复制到剪贴板！');
+    } catch (e) {
+        // 降级方案
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed'; ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('✅ 已复制到剪贴板！');
+    }
+}
+
+// ─── 任务管理：加载所有任务 ──────────────────────────────────────────────────────
+async function loadAllTasks() {
+    const container = document.getElementById('all-task-list');
+    try {
+        const tasks = await apiFetch(API.tasks);
+        if (!tasks.length) {
+            container.innerHTML = '<p class="empty-hint">暂无任务，在上方添加第一个吧 ✨</p>';
+            return;
+        }
+        container.innerHTML = tasks.map(t => {
+            const cd = t.cycle_days;
+            const freq = cd === 1 ? '每天' : cd === 7 ? '每周' : '每 ' + cd + ' 天';
+            return `<div class="task-item manage-item">
+                <div class="task-info">
+                    <span class="task-name">${escapeHtml(t.name)}</span>
+                    <span class="task-cycle">🔄 ${freq}</span>
+                    <span class="task-start">📅 起始：${t.start_date}</span>
+                </div>
+                <button class="btn btn-delete" onclick="deleteTask(${t.id})">🗑️ 删除</button>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        container.innerHTML = '<p class="empty-hint error">加载失败：' + escapeHtml(e.message) + '</p>';
+    }
+}
+
+async function addTask() {
+    const nameInput = document.getElementById('new-task-name');
+    const cycleInput = document.getElementById('new-task-cycle');
+    const name = nameInput.value.trim();
+    const cycle = parseInt(cycleInput.value) || 1;
+
+    if (!name) { showToast('请输入任务名称', 'error'); return; }
+    if (cycle < 1) { showToast('周期天数至少为 1', 'error'); return; }
+
+    try {
+        await apiFetch(API.tasks, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, cycle_days: cycle }),
+        });
+        nameInput.value = '';
+        cycleInput.value = '1';
+        showToast('✅ 任务已添加');
+        await loadAllTasks();
+        await loadTodayTasks();
+    } catch (e) {
+        showToast('❌ ' + e.message, 'error');
+    }
+}
+
+async function deleteTask(id) {
+    if (!confirm('确定要删除这个任务吗？')) return;
+    try {
+        await apiFetch(API.tasks + '/' + id, { method: 'DELETE' });
+        showToast('✅ 任务已删除');
+        await loadAllTasks();
+        await loadTodayTasks();
+    } catch (e) {
+        showToast('❌ ' + e.message, 'error');
+    }
+}
+
+// ─── 今日打卡：加载今日任务 ──────────────────────────────────────────────────────
+async function loadTodayTasks() {
+    const container = document.getElementById('today-task-list');
+    document.getElementById('today-date').textContent = formatDateCN(todayISO());
+    try {
+        const data = await apiFetch(API.today);
+        const tasks = data.tasks;
+        if (!tasks.length) {
+            container.innerHTML = '<p class="empty-hint">还没有任务，去「任务管理」添加吧 📝</p>';
+            return;
+        }
+        container.innerHTML = tasks.map(t => {
+            const dueClass = t.is_due ? 'due' : 'not-due';
+            const dayInfo = t.day_number ? '第 ' + t.day_number + ' 天' : '';
+            return `<div class="task-item ${dueClass}">
+                <label class="task-check-label">
+                    <input type="checkbox"
+                           class="task-checkbox"
+                           data-id="${t.id}"
+                           data-name="${escapeHtml(t.name)}"
+                           onchange="onCheckChange(this)"
+                           ${!t.is_due ? 'disabled' : ''}>
+                    <span class="checkmark"></span>
+                    <span class="task-name">${escapeHtml(t.name)}</span>
+                    ${t.is_due ? '<span class="task-day-badge">' + dayInfo + '</span>' : '<span class="task-skip-badge">⏳ 非今日</span>'}
+                </label>
+                <div class="task-detail-row" id="detail-row-${t.id}" style="display:none;">
+                    <input type="text"
+                           class="task-detail-input"
+                           id="detail-${t.id}"
+                           placeholder="填写执行细节（如：哑铃飞鸟4组）…"
+                           maxlength="200">
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        container.innerHTML = '<p class="empty-hint error">加载失败：' + escapeHtml(e.message) + '</p>';
+    }
+}
+
+function onCheckChange(cb) {
+    const id = cb.dataset.id;
+    const row = document.getElementById('detail-row-' + id);
+    if (cb.checked) {
+        row.style.display = 'block';
+        setTimeout(() => { document.getElementById('detail-' + id).focus(); }, 100);
+    } else {
+        row.style.display = 'none';
+        document.getElementById('detail-' + id).value = '';
+    }
+}
+
+// ─── 生成 Markdown ──────────────────────────────────────────────────────────────
+async function generateMarkdown() {
+    // 收集所有勾选状态的任务
+    const checkboxes = document.querySelectorAll('#today-task-list .task-checkbox');
+    if (!checkboxes.length) {
+        showToast('⚠️ 没有可生成的任务，请先添加任务', 'error');
+        return;
+    }
+
+    const tasksPayload = [];
+    checkboxes.forEach(cb => {
+        const id = parseInt(cb.dataset.id);
+        const name = cb.dataset.name;
+        const checked = cb.checked;
+        const detailInput = document.getElementById('detail-' + id);
+        const detail = detailInput ? detailInput.value : '';
+        tasksPayload.push({ id, name, checked, detail });
+    });
+
+    const notes = document.getElementById('daily-notes').value;
+
+    try {
+        const result = await apiFetch(API.generate, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: todayISO(),
+                tasks: tasksPayload,
+                notes: notes,
+            }),
+        });
+        document.getElementById('md-output').textContent = result.markdown;
+        document.getElementById('md-modal').style.display = 'flex';
+    } catch (e) {
+        showToast('❌ 生成失败：' + e.message, 'error');
+    }
+}
+
+// ─── HTML 转义 ──────────────────────────────────────────────────────────────────
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ─── 回车添加任务 ───────────────────────────────────────────────────────────────
+document.getElementById('new-task-name').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') addTask();
+});
+
+// ─── 页面初始化 ─────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    loadTodayTasks();
+    loadAllTasks();
+});
+</script>
+</body>
+</html>

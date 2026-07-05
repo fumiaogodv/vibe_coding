@@ -1,0 +1,6 @@
+{
+    "name": "任务打卡与日记",
+    "description": "管理周期性任务，每日打卡，一键生成 Markdown 日记。",
+    "icon": "✅",
+    "url_prefix": "/task-tracker"
+}
