@@ -1,0 +1,178 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0f0f0f;
+    color: #e1e1e1;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 20px;
+}
+
+h1 {
+    text-align: center;
+    font-size: 2rem;
+    margin-bottom: 8px;
+    color: #fff;
+}
+
+.subtitle {
+    text-align: center;
+    color: #888;
+    margin-bottom: 48px;
+    font-size: 0.95rem;
+}
+
+.modules-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 24px;
+}
+
+.module-card {
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    padding: 28px 24px;
+    transition: border-color 0.2s, transform 0.2s;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+}
+
+.module-card:hover {
+    border-color: #4a9eff;
+    transform: translateY(-2px);
+}
+
+.module-card h2 {
+    font-size: 1.15rem;
+    margin-bottom: 10px;
+    color: #fff;
+}
+
+.module-card p {
+    color: #999;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+/* 子模块页面通用样式 */
+.page-header {
+    margin-bottom: 32px;
+}
+
+.page-header a {
+    color: #4a9eff;
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
+.page-header a:hover {
+    text-decoration: underline;
+}
+
+.page-header h1 {
+    text-align: left;
+    margin-top: 12px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+    color: #ccc;
+}
+
+.form-group input[type="text"],
+.form-group input[type="url"],
+.form-group textarea,
+.form-group select {
+    width: 100%;
+    padding: 10px 14px;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    color: #e1e1e1;
+    font-size: 0.95rem;
+    font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group textarea:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: #4a9eff;
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 120px;
+}
+
+.btn {
+    display: inline-block;
+    padding: 10px 24px;
+    background: #4a9eff;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn:hover {
+    background: #3a8eef;
+}
+
+.btn:disabled {
+    background: #333;
+    cursor: not-allowed;
+    color: #666;
+}
+
+.result-box {
+    margin-top: 24px;
+    padding: 20px;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.6;
+    max-height: 500px;
+    overflow-y: auto;
+    font-size: 0.9rem;
+}
+
+.alert {
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+}
+
+.alert-error {
+    background: #2d1515;
+    border: 1px solid #5a2020;
+    color: #ff6b6b;
+}
+
+.alert-success {
+    background: #152d15;
+    border: 1px solid #205a20;
+    color: #6bff6b;
+}

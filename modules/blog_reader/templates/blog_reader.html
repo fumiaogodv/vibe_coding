@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if view == 'reader' %}{{ filename }}{% else %}博客字幕阅读器{% endif %} - Vibe Hub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('blog_reader.static', filename='style.css') }}">
+    <style>
+        /* ── 通用 ── */
+        .tab-bar { display: flex; gap: 0; margin-bottom: 24px; border-bottom: 1px solid #2a2a2a; }
+        .tab-btn {
+            padding: 10px 20px; background: none; border: none; color: #888;
+            cursor: pointer; font-size: 0.95rem; border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover { color: #ccc; }
+        .tab-btn.active { color: #4a9eff; border-bottom-color: #4a9eff; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* ── 文件列表 ── */
+        .file-list { list-style: none; }
+        .file-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 18px; background: #1a1a1a; border: 1px solid #2a2a2a;
+            border-radius: 8px; margin-bottom: 10px; transition: border-color 0.2s;
+        }
+        .file-item:hover { border-color: #4a9eff; }
+        .file-item a { color: #e1e1e1; text-decoration: none; flex: 1; font-size: 0.95rem; }
+        .file-item a:hover { color: #4a9eff; }
+        .progress-badge { font-size: 0.75rem; color: #666; margin-left: 12px; white-space: nowrap; }
+        .delete-btn {
+            background: none; border: none; cursor: pointer; font-size: 1rem;
+            padding: 4px 8px; color: #555; transition: color 0.2s; margin-left: 8px;
+        }
+        .delete-btn:hover { color: #ff4757; }
+
+        /* ── 上传区域 ── */
+        .upload-area {
+            border: 2px dashed #2a2a2a; border-radius: 8px; padding: 24px;
+            text-align: center; margin-bottom: 24px; transition: border-color 0.2s;
+            cursor: pointer;
+        }
+        .upload-area:hover, .upload-area.dragover { border-color: #4a9eff; }
+        .upload-area p { color: #666; margin: 0; }
+        .upload-area input[type="file"] { display: none; }
+
+        /* ── 分组卡片（喜欢/收藏） ── */
+        .group-card {
+            background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px;
+            margin-bottom: 16px; overflow: hidden;
+        }
+        .group-header {
+            padding: 12px 18px; background: #1e1e1e; cursor: pointer;
+            display: flex; justify-content: space-between; align-items: center;
+            transition: background 0.2s;
+        }
+        .group-header:hover { background: #252525; }
+        .group-header .name { color: #e1e1e1; font-size: 0.95rem; }
+        .group-header .count { color: #666; font-size: 0.8rem; }
+        .group-body { display: none; padding: 0; }
+        .group-body.open { display: block; }
+
+        /* ── 喜欢的句子 ── */
+        .liked-line {
+            padding: 10px 18px; border-top: 1px solid #1e1e1e;
+            color: #ccc; font-size: 0.9rem; line-height: 1.6;
+        }
+        .liked-line .line-num { color: #555; margin-right: 8px; font-size: 0.8rem; }
+
+        /* ── 收藏笔记卡片 ── */
+        .note-card {
+            padding: 12px 18px; border-top: 1px solid #1e1e1e;
+            cursor: pointer; transition: background 0.2s;
+        }
+        .note-card:hover { background: #222; }
+        .note-card .quote {
+            color: #aaa; font-size: 0.85rem; line-height: 1.5;
+            display: -webkit-box; -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .note-card .note-meta { color: #666; font-size: 0.75rem; margin-top: 4px; }
+
+        /* ── 阅读器 ── */
+        .reader-layout { display: flex; gap: 24px; }
+        .reader-main { flex: 1; min-width: 0; }
+        .reader-sidebar { width: 300px; flex-shrink: 0; }
+        @media (max-width: 900px) {
+            .reader-layout { flex-direction: column; }
+            .reader-sidebar { width: 100%; }
+        }
+        .reader-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+        }
+        .reader-header h1 { font-size: 1.2rem; color: #fff; margin: 0; flex: 1; }
+        .content-area {
+            background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px;
+            padding: 24px 32px; line-height: 2; font-size: 1rem; color: #ccc;
+            max-height: 75vh; overflow-y: auto;
+        }
+        .content-area .line {
+            padding: 2px 0; cursor: default; transition: background 0.15s;
+            border-radius: 4px; padding: 2px 6px; margin: 0 -6px;
+            display: flex; align-items: flex-start; gap: 8px;
+        }
+        .content-area .line:hover { background: #1e1e2a; }
+        .content-area .line.highlighted { background: #2a3a4a; }
+        .content-area .line .like-line-btn {
+            background: none; border: none; cursor: pointer; font-size: 0.9rem;
+            padding: 2px 4px; flex-shrink: 0; opacity: 0.3; transition: opacity 0.2s;
+        }
+        .content-area .line:hover .like-line-btn { opacity: 0.7; }
+        .content-area .line .like-line-btn.liked { opacity: 1; }
+        .content-area .line .line-text { flex: 1; }
+
+        /* ── 选中文本浮动按钮 ── */
+        .float-bar {
+            position: fixed; z-index: 1000; display: none;
+            background: #222; border: 1px solid #444; border-radius: 8px;
+            padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .float-bar button {
+            background: none; border: none; cursor: pointer; padding: 6px 12px;
+            color: #ccc; font-size: 0.85rem; border-radius: 6px;
+            transition: background 0.2s;
+        }
+        .float-bar button:hover { background: #333; }
+
+        /* ── 侧边栏 ── */
+        .side-panel {
+            background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px;
+            padding: 16px; max-height: 75vh; overflow-y: auto;
+        }
+        .side-panel h3 { color: #fff; margin: 0 0 12px; font-size: 0.95rem; }
+        .side-panel .side-note {
+            background: #222; border: 1px solid #333; border-radius: 6px;
+            padding: 10px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.2s;
+        }
+        .side-panel .side-note:hover { border-color: #4a9eff; }
+        .side-panel .side-note .quote { color: #aaa; font-size: 0.8rem; line-height: 1.4; }
+
+        /* ── 弹窗 ── */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+            z-index: 2000; display: none; align-items: center; justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-box {
+            background: #1a1a1a; border: 1px solid #333; border-radius: 12px;
+            padding: 24px; width: 90%; max-width: 600px; max-height: 80vh; overflow-y: auto;
+        }
+        .modal-box h3 { color: #fff; margin: 0 0 16px; }
+        .modal-box .quote-display {
+            background: #222; border-left: 3px solid #4a9eff;
+            padding: 12px 16px; margin-bottom: 16px; color: #aaa;
+            border-radius: 0 6px 6px 0; line-height: 1.6; font-size: 0.9rem;
+        }
+        .modal-box textarea {
+            width: 100%; min-height: 120px; background: #222; border: 1px solid #333;
+            border-radius: 8px; color: #e1e1e1; padding: 12px; font-size: 0.9rem;
+            font-family: inherit; resize: vertical; box-sizing: border-box;
+        }
+        .modal-box textarea:focus { outline: none; border-color: #4a9eff; }
+        .modal-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; }
+
+        .empty-hint { color: #555; font-size: 0.9rem; padding: 16px 0; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="page-header">
+            <a href="{{ url_for('index') }}">&larr; 返回 Hub 首页</a>
+            {% if view == 'reader' %}
+            <a href="{{ url_for('blog_reader.index') }}" style="margin-left:16px; color:#4a9eff;">&larr; 返回文件列表</a>
+            {% endif %}
+        </div>
+
+        {% if view == 'list' %}
+        <!-- ═══ 文件列表页 ═══ -->
+        <h1 style="margin-bottom:8px;">博客字幕阅读器</h1>
+        <p style="color:#888; margin-bottom:24px;">
+            阅读字幕文件，选中文字标记喜欢或收藏感悟。
+        </p>
+
+        <!-- 上传区域 -->
+        <div class="upload-area" id="upload-area">
+            <p>点击或拖拽上传字幕文件（.txt / .srt / .md）</p>
+            <input type="file" id="file-input" accept=".txt,.srt,.md">
+        </div>
+
+        <!-- Tab 栏 -->
+        <div class="tab-bar">
+            <button class="tab-btn active" data-tab="files">文件列表</button>
+            <button class="tab-btn" data-tab="likes">喜欢的句子</button>
+            <button class="tab-btn" data-tab="collections">收藏与感悟</button>
+        </div>
+
+        <!-- Tab: 文件列表 -->
+        <div class="tab-panel active" id="tab-files">
+            {% if not files %}
+            <p class="empty-hint">暂无字幕文件，请上传。</p>
+            {% else %}
+            <ul class="file-list">
+                {% for f in files %}
+                <li class="file-item">
+                    <a href="{{ url_for('blog_reader.read_file', filename=f) }}">{{ f }}</a>
+                    {% set prog = progress.get(f, 0) %}
+                    {% if prog > 0 %}
+                    <span class="progress-badge">已读 {{ prog }} 段</span>
+                    {% endif %}
+                    <button class="delete-btn" onclick="deleteFile('{{ f }}', this)" title="删除">🗑️</button>
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+
+        <!-- Tab: 喜欢的句子 -->
+        <div class="tab-panel" id="tab-likes">
+            <div id="likes-content"><p class="empty-hint">加载中...</p></div>
+        </div>
+
+        <!-- Tab: 收藏与感悟 -->
+        <div class="tab-panel" id="tab-collections">
+            <div id="collections-content"><p class="empty-hint">加载中...</p></div>
+        </div>
+
+        {% elif view == 'reader' %}
+        <!-- ═══ 阅读器页 ═══ -->
+        <div class="reader-layout">
+            <div class="reader-main">
+                <div class="reader-header">
+                    <h1>{{ filename }}</h1>
+                    <span style="color:#666; font-size:0.85rem;" id="scroll-indicator"></span>
+                </div>
+                <div class="content-area" id="content-area">
+                    {% for line in lines %}
+                    <div class="line" data-index="{{ line.index }}" data-text="{{ line.text }}">
+                        <button class="like-line-btn {{ 'liked' if line.index in liked_indices else '' }}"
+                                onclick="toggleLineLike({{ line.index }}, '{{ line.text|e }}', this)"
+                                title="喜欢这句话">
+                            {{ '❤️' if line.index in liked_indices else '🤍' }}
+                        </button>
+                        <span class="line-text">{{ line.text }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="reader-sidebar">
+                <div class="side-panel" id="side-panel">
+                    <h3>本篇收藏</h3>
+                    <div id="file-notes-list">
+                        <p class="empty-hint">选中文本可收藏金句</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 浮动操作栏 -->
+    <div class="float-bar" id="float-bar">
+        <button id="float-like-btn">❤️ 喜欢</button>
+        <button id="float-collect-btn">📝 收藏</button>
+    </div>
+
+    <!-- 弹窗 -->
+    <div class="modal-overlay" id="note-modal">
+        <div class="modal-box">
+            <h3>收藏与感悟</h3>
+            <div class="quote-display" id="modal-quote"></div>
+            <label style="color:#888; font-size:0.85rem; display:block; margin-bottom:8px;">我的感悟：</label>
+            <textarea id="modal-reflection" placeholder="写下你的感悟..."></textarea>
+            <input type="hidden" id="modal-note-filename">
+            <div class="modal-actions">
+                <button class="btn" style="background:#555;" onclick="closeModal()">关闭</button>
+                <button class="btn" onclick="saveReflection()">保存感悟</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = {
+            upload:        "{{ url_for('blog_reader.upload_file') }}",
+            deleteFile:    "{{ url_for('blog_reader.delete_file', filename='__F__') }}",
+            saveProgress:  "{{ url_for('blog_reader.save_progress') }}",
+            getProgress:   "{{ url_for('blog_reader.get_progress', filename='__F__') }}",
+            toggleLike:    "{{ url_for('blog_reader.toggle_like_sentence') }}",
+            getAllLikes:   "{{ url_for('blog_reader.get_all_likes') }}",
+            collectQuote:  "{{ url_for('blog_reader.collect_quote') }}",
+            getCollections:"{{ url_for('blog_reader.get_collections') }}",
+            getFileCollections:"{{ url_for('blog_reader.get_file_collections', source_file='__F__') }}",
+            getNote:       "{{ url_for('blog_reader.get_note', note_filename='__F__') }}",
+            updateNote:    "{{ url_for('blog_reader.update_note', note_filename='__F__') }}",
+        };
+        function apiUrl(key, param) { return API[key].replace('__F__', encodeURIComponent(param)); }
+
+        const currentFilename = "{{ filename|default('') }}";
+        const currentView = "{{ view }}";
+
+        // ─── Tab 切换 ───
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+                if (btn.dataset.tab === 'likes') loadAllLikes();
+                if (btn.dataset.tab === 'collections') loadCollections();
+            });
+        });
+
+        // ─── 文件上传 ───
+        const uploadArea = document.getElementById('upload-area');
+        const fileInput = document.getElementById('file-input');
+        if (uploadArea) {
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+            uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault(); uploadArea.classList.remove('dragover');
+                if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+            });
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files.length) uploadFile(fileInput.files[0]);
+            });
+        }
+
+        async function uploadFile(file) {
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                const resp = await fetch(API.upload, { method: 'POST', body: fd });
+                const data = await resp.json();
+                if (data.ok) {
+                    location.reload();
+                } else {
+                    alert(data.error || '上传失败');
+                }
+            } catch (err) {
+                alert('上传失败: ' + err.message);
+            }
+        }
+
+        // ─── 删除字幕文件 ───
+        async function deleteFile(filename, btn) {
+            if (!confirm('确定删除「' + filename + '」？\n该文件的所有喜欢标记和收藏感悟也会被一并删除。')) return;
+            try {
+                const resp = await fetch(apiUrl('deleteFile', filename), { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.ok) {
+                    // 移除 DOM 节点
+                    btn.closest('.file-item').remove();
+                } else {
+                    alert(data.error || '删除失败');
+                }
+            } catch (err) {
+                alert('删除失败: ' + err.message);
+            }
+        }
+
+        // ─── 喜欢列表 ───
+        async function loadAllLikes() {
+            try {
+                const resp = await fetch(API.getAllLikes);
+                const data = await resp.json();
+                const container = document.getElementById('likes-content');
+                const likes = data.likes || {};
+                const keys = Object.keys(likes);
+                if (!keys.length) {
+                    container.innerHTML = '<p class="empty-hint">暂无喜欢的句子。阅读时选中文字或点击行首 ❤️ 即可标记。</p>';
+                    return;
+                }
+                container.innerHTML = keys.map(source => `
+                    <div class="group-card">
+                        <div class="group-header" onclick="this.nextElementSibling.classList.toggle('open')">
+                            <span class="name">${source}</span>
+                            <span class="count">${likes[source].length} 句</span>
+                        </div>
+                        <div class="group-body">
+                            ${likes[source].map(item => `
+                                <div class="liked-line">
+                                    <span class="line-num">#${item.index}</span>${item.text}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.log('加载喜欢列表失败:', err);
+            }
+        }
+
+        // ─── 收藏列表 ───
+        async function loadCollections() {
+            try {
+                const resp = await fetch(API.getCollections);
+                const data = await resp.json();
+                const container = document.getElementById('collections-content');
+                const collections = data.collections || {};
+                const keys = Object.keys(collections);
+                if (!keys.length) {
+                    container.innerHTML = '<p class="empty-hint">暂无收藏。阅读时选中文字点击「收藏」即可。</p>';
+                    return;
+                }
+                container.innerHTML = keys.map(source => `
+                    <div class="group-card">
+                        <div class="group-header" onclick="this.nextElementSibling.classList.toggle('open')">
+                            <span class="name">${source}</span>
+                            <span class="count">${collections[source].length} 条收藏</span>
+                        </div>
+                        <div class="group-body">
+                            ${collections[source].map(note => `
+                                <div class="note-card" onclick="openNoteDetail('${source}/${note.filename}')">
+                                    <div class="quote">"${note.captured_text}"</div>
+                                    <div class="note-meta">${note.created_at}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.log('加载收藏列表失败:', err);
+            }
+        }
+
+        // ─── 阅读器页 ───
+        if (currentView === 'reader') {
+            const contentArea = document.getElementById('content-area');
+            const floatBar = document.getElementById('float-bar');
+            let selectedText = '';
+
+            // 恢复进度
+            restoreProgress();
+
+            // 节流保存滚动进度
+            let scrollTimer = null;
+            contentArea.addEventListener('scroll', () => {
+                clearTimeout(scrollTimer);
+                scrollTimer = setTimeout(() => {
+                    const idx = getVisibleLineIndex();
+                    saveProgress(idx);
+                    document.getElementById('scroll-indicator').textContent = '段落 ' + idx;
+                }, 500);
+            });
+
+            // 选中文本 → 浮动操作栏
+            document.addEventListener('mouseup', (e) => {
+                setTimeout(() => {
+                    const sel = window.getSelection();
+                    const text = sel.toString().trim();
+                    if (text.length >= 2 && contentArea.contains(sel.anchorNode)) {
+                        selectedText = text;
+                        const range = sel.getRangeAt(0);
+                        const rect = range.getBoundingClientRect();
+                        floatBar.style.left = (rect.left + rect.width / 2 - 80) + 'px';
+                        floatBar.style.top = (rect.top - 40) + 'px';
+                        floatBar.style.display = 'flex';
+                    } else {
+                        floatBar.style.display = 'none';
+                    }
+                }, 10);
+            });
+
+            // 浮动栏 - 喜欢
+            document.getElementById('float-like-btn').addEventListener('click', () => {
+                if (selectedText) {
+                    likeSelectedText(selectedText);
+                    floatBar.style.display = 'none';
+                    window.getSelection().removeAllRanges();
+                }
+            });
+
+            // 浮动栏 - 收藏
+            document.getElementById('float-collect-btn').addEventListener('click', () => {
+                if (selectedText) {
+                    collectQuote(selectedText);
+                    floatBar.style.display = 'none';
+                    window.getSelection().removeAllRanges();
+                }
+            });
+
+            // 加载侧边栏笔记
+            loadFileNotes();
+        }
+
+        // ─── 句子级别喜欢（行首按钮） ───
+        async function toggleLineLike(index, text, btn) {
+            try {
+                const resp = await fetch(API.toggleLike, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: currentFilename, index: index, text: text }),
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    btn.textContent = data.liked ? '❤️' : '🤍';
+                    btn.classList.toggle('liked', data.liked);
+                }
+            } catch (err) {
+                console.log('喜欢操作失败:', err);
+            }
+        }
+
+        // ─── 选中文本喜欢（浮动按钮） ───
+        async function likeSelectedText(text) {
+            try {
+                const resp = await fetch(API.toggleLike, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: currentFilename, index: 0, text: text }),
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    // 更新行首按钮状态
+                    document.querySelectorAll('.line').forEach(line => {
+                        if (line.dataset.text && text.includes(line.dataset.text)) {
+                            const btn = line.querySelector('.like-line-btn');
+                            btn.textContent = data.liked ? '❤️' : '🤍';
+                            btn.classList.toggle('liked', data.liked);
+                        }
+                    });
+                }
+            } catch (err) {
+                alert('操作失败: ' + err.message);
+            }
+        }
+
+        // ─── 收藏金句 ───
+        async function collectQuote(text) {
+            try {
+                const resp = await fetch(API.collectQuote, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: currentFilename, captured_text: text }),
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    openNoteEditor(currentFilename + '/' + data.note_filename, text, '');
+                    loadFileNotes();
+                }
+            } catch (err) {
+                alert('收藏失败: ' + err.message);
+            }
+        }
+
+        // ─── 阅读进度 ───
+        async function restoreProgress() {
+            try {
+                const resp = await fetch(apiUrl('getProgress', currentFilename));
+                const data = await resp.json();
+                if (data.paragraph_index > 0) {
+                    const target = document.querySelector(`.line[data-index="${data.paragraph_index}"]`);
+                    if (target) {
+                        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        target.classList.add('highlighted');
+                        setTimeout(() => target.classList.remove('highlighted'), 2000);
+                    }
+                }
+            } catch (err) { console.log('恢复进度失败:', err); }
+        }
+
+        function getVisibleLineIndex() {
+            const container = document.getElementById('content-area');
+            const rect = container.getBoundingClientRect();
+            let best = 0;
+            document.querySelectorAll('.line').forEach(line => {
+                if (line.getBoundingClientRect().top <= rect.top + 100) {
+                    best = parseInt(line.dataset.index);
+                }
+            });
+            return best;
+        }
+
+        async function saveProgress(index) {
+            try {
+                await fetch(API.saveProgress, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: currentFilename, paragraph_index: index }),
+                });
+            } catch (err) { console.log('保存进度失败:', err); }
+        }
+
+        // ─── 侧边栏笔记 ───
+        async function loadFileNotes() {
+            if (!currentFilename) return;
+            try {
+                const resp = await fetch(apiUrl('getFileCollections', currentFilename));
+                const data = await resp.json();
+                const container = document.getElementById('file-notes-list');
+                if (!data.notes.length) {
+                    container.innerHTML = '<p class="empty-hint">选中文本可收藏金句</p>';
+                    return;
+                }
+                container.innerHTML = data.notes.map(n => `
+                    <div class="side-note" onclick="openNoteDetail('${currentFilename}/${n.filename}')">
+                        <div class="quote">"${n.captured_text}"</div>
+                    </div>
+                `).join('');
+            } catch (err) { console.log('加载笔记失败:', err); }
+        }
+
+        // ─── 笔记弹窗 ───
+        async function openNoteDetail(notePath) {
+            try {
+                const resp = await fetch(apiUrl('getNote', notePath));
+                const data = await resp.json();
+                openNoteEditor(notePath, data.captured_text, data.reflection || '');
+            } catch (err) { alert('加载笔记失败: ' + err.message); }
+        }
+
+        function openNoteEditor(notePath, quote, reflection) {
+            document.getElementById('modal-quote').textContent = quote;
+            document.getElementById('modal-reflection').value = reflection;
+            document.getElementById('modal-note-filename').value = notePath;
+            document.getElementById('note-modal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('note-modal').classList.remove('active');
+        }
+
+        async function saveReflection() {
+            const notePath = document.getElementById('modal-note-filename').value;
+            const reflection = document.getElementById('modal-reflection').value;
+            try {
+                const resp = await fetch(apiUrl('updateNote', notePath), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reflection }),
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    closeModal();
+                    if (currentView === 'reader') loadFileNotes();
+                    else { loadCollections(); }
+                }
+            } catch (err) { alert('保存失败: ' + err.message); }
+        }
+
+        document.getElementById('note-modal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('note-modal')) closeModal();
+        });
+    </script>
+</body>
+</html>

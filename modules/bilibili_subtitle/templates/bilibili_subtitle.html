@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bilibili 字幕抓取 - Vibe Hub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('bilibili_subtitle.static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="page-header">
+            <a href="{{ url_for('index') }}">&larr; 返回 Hub 首页</a>
+            <h1>Bilibili 字幕抓取与下载</h1>
+        </div>
+
+        <!-- Cookie 状态栏 -->
+        <div id="cookie-status-bar" style="margin-bottom:20px; padding:10px 16px; border-radius:8px; font-size:0.9rem;">
+            <span id="cookie-status-text"></span>
+            <a href="#" id="cookie-toggle-link" style="color:#4a9eff; margin-left:8px; text-decoration:none;"></a>
+        </div>
+
+        <form id="fetch-form">
+            <div class="form-group">
+                <label for="url">B 站视频链接</label>
+                <input type="text" id="url" name="url"
+                       placeholder="https://www.bilibili.com/video/BV... 或 https://b23.tv/..."
+                       required>
+            </div>
+
+            <!-- Cookie 输入区域 -->
+            <div id="cookie-section" style="margin-bottom:20px;">
+                <div class="form-group">
+                    <label for="cookie">B 站 SESSDATA Cookie</label>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="text" id="cookie" name="cookie"
+                               placeholder="粘贴你的 SESSDATA 值"
+                               style="font-size:0.85rem; flex:1;">
+                        <button type="button" class="btn" id="save-cookie-btn" style="white-space:nowrap; padding:10px 16px;">保存 Cookie</button>
+                        <button type="button" class="btn" id="clear-cookie-btn" style="white-space:nowrap; padding:10px 16px; background:#555;">清除</button>
+                    </div>
+                    <small style="color:#666; margin-top:4px; display:block;">
+                        浏览器登录 B 站 → F12 → Application → Cookies → bilibili.com → 复制 SESSDATA 值。<br>
+                        保存后下次打开页面会自动加载，无需重复输入。
+                    </small>
+                </div>
+            </div>
+
+            <details id="advanced-options" style="margin-bottom:20px; color:#888;">
+                <summary style="cursor:pointer; color:#4a9eff; margin-bottom:12px;">分P选择（可选）</summary>
+                <div class="form-group">
+                    <label for="page_index">选择分P（多P视频）</label>
+                    <select id="page_index" name="page_index" disabled>
+                        <option value="0">请先抓取视频信息</option>
+                    </select>
+                </div>
+            </details>
+
+            <button type="submit" class="btn" id="fetch-btn">抓取字幕</button>
+        </form>
+
+        <div id="error-box" class="alert alert-error" style="display:none;"></div>
+        <div id="success-box" class="alert alert-success" style="display:none;"></div>
+
+        <div id="result-section" style="display:none;">
+            <h2 style="margin: 24px 0 12px; color: #fff;" id="video-title"></h2>
+            <p style="color:#888; margin-bottom:8px;">
+                字幕语言: <span id="sub-lang"></span> |
+                条目数: <span id="sub-count"></span>
+            </p>
+
+            <div id="subtitle-selector" style="display:none; margin-bottom:16px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>切换字幕语言</label>
+                    <select id="subtitle-select"></select>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:20px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label style="margin-bottom:4px;">下载格式</label>
+                    <select id="download-format">
+                        <option value="txt">纯文本 (.txt)</option>
+                        <option value="timestamped">带时间戳 (.txt)</option>
+                        <option value="srt">SRT 字幕 (.srt)</option>
+                        <option value="json">原始 JSON (.json)</option>
+                    </select>
+                </div>
+                <button class="btn" id="download-btn" style="align-self:flex-end;">下载字幕文件</button>
+                <button class="btn" id="send-reader-btn" style="align-self:flex-end; background:#2d7d46;">发送到阅读器</button>
+            </div>
+
+            <div class="result-box" id="subtitle-text"></div>
+        </div>
+    </div>
+
+    <script>
+        // 由 Jinja2 渲染的所有 API 路径（兼容反向代理前缀）
+        const API = {
+            fetch:   "{{ url_for('bilibili_subtitle.fetch_subtitles') }}",
+            download:"{{ url_for('bilibili_subtitle.download') }}",
+            sendToReader: "{{ url_for('bilibili_subtitle.send_to_reader') }}",
+            cookieStatus: "{{ url_for('bilibili_subtitle.cookie_status') }}",
+            cookieSave:   "{{ url_for('bilibili_subtitle.save_cookie') }}",
+            cookieClear:  "{{ url_for('bilibili_subtitle.clear_cookie') }}",
+        };
+
+        const form = document.getElementById("fetch-form");
+        const fetchBtn = document.getElementById("fetch-btn");
+        const errorBox = document.getElementById("error-box");
+        const successBox = document.getElementById("success-box");
+        const resultSection = document.getElementById("result-section");
+        const pageSelect = document.getElementById("page_index");
+        const cookieInput = document.getElementById("cookie");
+        const cookieStatusBar = document.getElementById("cookie-status-bar");
+        const cookieStatusText = document.getElementById("cookie-status-text");
+        const cookieToggleLink = document.getElementById("cookie-toggle-link");
+        const cookieSection = document.getElementById("cookie-section");
+        const saveCookieBtn = document.getElementById("save-cookie-btn");
+        const clearCookieBtn = document.getElementById("clear-cookie-btn");
+
+        let lastResult = null;
+        let cookieSaved = false;
+
+        // ─── 初始化：检查 Cookie 状态 ───
+        async function checkCookieStatus() {
+            try {
+                const resp = await fetch(API.cookieStatus);
+                const data = await resp.json();
+                cookieSaved = data.has_cookie;
+
+                if (cookieSaved) {
+                    cookieStatusBar.style.background = "#152d15";
+                    cookieStatusBar.style.border = "1px solid #205a20";
+                    cookieStatusText.innerHTML = "Cookie 已保存 (" + data.preview + ")，抓取时会自动使用。";
+                    cookieToggleLink.textContent = "[更换]";
+                    cookieSection.style.display = "none";
+                } else {
+                    cookieStatusBar.style.background = "#2d2d15";
+                    cookieStatusBar.style.border = "1px solid #5a5a20";
+                    cookieStatusText.innerHTML = "未保存 Cookie。部分视频的 AI 字幕需要登录态才能获取。";
+                    cookieToggleLink.textContent = "[设置]";
+                    cookieSection.style.display = "block";
+                }
+            } catch (err) {
+                cookieStatusBar.style.background = "#2d1515";
+                cookieStatusBar.style.border = "1px solid #5a2020";
+                cookieStatusText.innerHTML = "Cookie 状态检查失败";
+                cookieToggleLink.textContent = "";
+            }
+        }
+
+        cookieToggleLink.addEventListener("click", (e) => {
+            e.preventDefault();
+            if (cookieSection.style.display === "none") {
+                cookieSection.style.display = "block";
+                cookieToggleLink.textContent = "[收起]";
+                cookieInput.focus();
+            } else {
+                cookieSection.style.display = "none";
+                cookieToggleLink.textContent = cookieSaved ? "[更换]" : "[设置]";
+            }
+        });
+
+        saveCookieBtn.addEventListener("click", async () => {
+            const val = cookieInput.value.trim();
+            if (!val) { showError("请先输入 SESSDATA Cookie"); return; }
+            try {
+                const fd = new FormData();
+                fd.set("cookie", val);
+                const resp = await fetch(API.cookieSave, { method: "POST", body: fd });
+                const data = await resp.json();
+                if (data.ok) { showSuccess(data.message); checkCookieStatus(); }
+                else { showError(data.error || "保存失败"); }
+            } catch (err) { showError("保存失败: " + err.message); }
+        });
+
+        clearCookieBtn.addEventListener("click", async () => {
+            try {
+                const resp = await fetch(API.cookieClear, { method: "POST" });
+                const data = await resp.json();
+                if (data.ok) { showSuccess(data.message); cookieInput.value = ""; checkCookieStatus(); }
+            } catch (err) { showError("清除失败: " + err.message); }
+        });
+
+        checkCookieStatus();
+
+        // ─── 分P / 字幕切换 ───
+        pageSelect.addEventListener("change", () => {
+            if (lastResult) form.dispatchEvent(new Event("submit"));
+        });
+
+        const subSelect = document.getElementById("subtitle-select");
+        subSelect.addEventListener("change", () => {
+            const idx = subSelect.value;
+            if (lastResult && lastResult.subtitles && lastResult.subtitles[idx]) {
+                loadSubtitle(idx);
+            }
+        });
+
+        function showError(msg) {
+            errorBox.textContent = msg;
+            errorBox.style.display = "block";
+            successBox.style.display = "none";
+        }
+        function showSuccess(msg) {
+            successBox.textContent = msg;
+            successBox.style.display = "block";
+            errorBox.style.display = "none";
+        }
+        function hideMessages() {
+            errorBox.style.display = "none";
+            successBox.style.display = "none";
+        }
+
+        // ─── 抓取字幕 ───
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            hideMessages();
+            resultSection.style.display = "none";
+            fetchBtn.disabled = true;
+            fetchBtn.textContent = "抓取中...";
+
+            try {
+                const formData = new FormData(form);
+                const resp = await fetch(API.fetch, { method: "POST", body: formData });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    let msg = data.error || "请求失败";
+                    if (data.hint) msg += "\n" + data.hint;
+                    if (data.pages && data.pages.length > 1) updatePageSelector(data.pages, 0);
+                    showError(msg);
+                    return;
+                }
+
+                lastResult = data;
+
+                if (data.pages && data.pages.length > 1) {
+                    updatePageSelector(data.pages, data.current_page || 0);
+                } else {
+                    pageSelect.disabled = true;
+                    pageSelect.innerHTML = '<option value="0">单P视频</option>';
+                }
+
+                if (data.subtitles && data.subtitles.length > 1) {
+                    const subSelector = document.getElementById("subtitle-selector");
+                    subSelect.innerHTML = "";
+                    data.subtitles.forEach((sub, i) => {
+                        const opt = document.createElement("option");
+                        opt.value = i;
+                        opt.textContent = sub.lan_doc + (sub.type === 1 ? " (AI)" : "");
+                        subSelect.appendChild(opt);
+                    });
+                    subSelector.style.display = "block";
+                } else {
+                    document.getElementById("subtitle-selector").style.display = "none";
+                }
+
+                document.getElementById("video-title").textContent = data.title;
+                document.getElementById("sub-lang").textContent = data.language;
+                document.getElementById("sub-count").textContent = data.count;
+                document.getElementById("subtitle-text").textContent = data.text;
+                resultSection.style.display = "block";
+                showSuccess("字幕抓取成功！共 " + data.count + " 条。");
+            } catch (err) {
+                showError("网络错误: " + err.message);
+            } finally {
+                fetchBtn.disabled = false;
+                fetchBtn.textContent = "抓取字幕";
+            }
+        });
+
+        async function loadSubtitle(subtitleIndex) {
+            const formData = new FormData(form);
+            formData.set("subtitle_index", subtitleIndex);
+            hideMessages();
+            fetchBtn.disabled = true;
+            fetchBtn.textContent = "切换中...";
+            try {
+                const resp = await fetch(API.fetch, { method: "POST", body: formData });
+                const data = await resp.json();
+                if (!resp.ok) { showError(data.error || "切换字幕失败"); return; }
+                lastResult = data;
+                document.getElementById("sub-lang").textContent = data.language;
+                document.getElementById("sub-count").textContent = data.count;
+                document.getElementById("subtitle-text").textContent = data.text;
+                showSuccess("已切换至: " + data.language + "，共 " + data.count + " 条。");
+            } catch (err) {
+                showError("切换字幕失败: " + err.message);
+            } finally {
+                fetchBtn.disabled = false;
+                fetchBtn.textContent = "抓取字幕";
+            }
+        }
+
+        function updatePageSelector(pages, currentIndex) {
+            pageSelect.disabled = false;
+            pageSelect.innerHTML = "";
+            pages.forEach((p, i) => {
+                const opt = document.createElement("option");
+                opt.value = i;
+                opt.textContent = "P" + p.page + " - " + p.part;
+                if (i === currentIndex) opt.selected = true;
+                pageSelect.appendChild(opt);
+            });
+        }
+
+        // ─── 下载 ───
+        document.getElementById("download-btn").addEventListener("click", () => {
+            if (!lastResult) return;
+            const format = document.getElementById("download-format").value;
+            const dlForm = document.createElement("form");
+            dlForm.method = "POST";
+            dlForm.action = API.download;
+            dlForm.style.display = "none";
+
+            const addField = (name, value) => {
+                const input = document.createElement("input");
+                input.type = "hidden";
+                input.name = name;
+                input.value = value;
+                dlForm.appendChild(input);
+            };
+
+            if (format === "timestamped") {
+                addField("text", lastResult.text);
+                addField("format", "txt");
+            } else if (format === "srt") {
+                addField("text", lastResult.srt_text);
+                addField("srt_text", lastResult.srt_text);
+                addField("format", "srt");
+                addField("raw", JSON.stringify(lastResult.raw));
+            } else if (format === "json") {
+                addField("text", JSON.stringify(lastResult.raw, null, 4));
+                addField("format", "json");
+                addField("raw", JSON.stringify(lastResult.raw));
+            } else {
+                addField("text", lastResult.plain_text);
+                addField("format", "txt");
+            }
+
+            addField("filename", (lastResult.raw_title || "subtitle").replace(/[\/\\:*?"<>|\n]/g, "_"));
+
+            document.body.appendChild(dlForm);
+            dlForm.submit();
+            document.body.removeChild(dlForm);
+        });
+
+        // ─── 发送到阅读器 ───
+        document.getElementById("send-reader-btn").addEventListener("click", async () => {
+            if (!lastResult) return;
+            try {
+                const fd = new FormData();
+                fd.set("text", lastResult.plain_text);
+                fd.set("filename", (lastResult.raw_title || "subtitle").replace(/[\/\\:*?"<>|\n]/g, "_"));
+                const resp = await fetch(API.sendToReader, { method: "POST", body: fd });
+                const data = await resp.json();
+                if (data.ok) {
+                    showSuccess(data.message);
+                } else {
+                    showError(data.error || "发送失败");
+                }
+            } catch (err) {
+                showError("发送失败: " + err.message);
+            }
+        });
+    </script>
+</body>
+</html>

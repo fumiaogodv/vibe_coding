@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 字幕角色分离 - Vibe Hub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('speaker_diarization.static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="page-header">
+            <a href="{{ url_for('index') }}">&larr; 返回 Hub 首页</a>
+            <h1>AI 字幕角色分离</h1>
+        </div>
+
+        <p style="color:#888; margin-bottom:24px; line-height:1.6;">
+            上传或粘贴对话字幕文件（支持 .txt / .srt），AI 将自动分析上下文语境，智能识别并分离不同说话人。<br>
+            处理采用批量模式，每批处理 30 行，带上下文重叠以保持角色连贯性。
+        </p>
+
+        <form id="process-form">
+            <div class="form-group">
+                <label for="subtitle_file">上传字幕文件（.txt / .srt）</label>
+                <input type="file" id="subtitle_file" name="subtitle_file"
+                       accept=".txt,.srt,.vtt" style="color:#ccc;">
+            </div>
+
+            <div class="form-group">
+                <label for="subtitle_text">或直接粘贴字幕文本</label>
+                <textarea id="subtitle_text" name="subtitle_text" rows="8"
+                          placeholder="每行一句字幕，或粘贴 SRT 格式内容..."></textarea>
+            </div>
+
+            <details style="margin-bottom:20px; color:#888;">
+                <summary style="cursor:pointer; color:#4a9eff; margin-bottom:12px;">高级选项（可选）</summary>
+                <div class="form-group">
+                    <label for="batch_size">每批处理行数</label>
+                    <select id="batch_size" name="batch_size">
+                        <option value="15">15 行（更精确，更慢）</option>
+                        <option value="30" selected>30 行（推荐）</option>
+                        <option value="50">50 行（更快，可能略粗糙）</option>
+                    </select>
+                    <small style="color:#666; margin-top:4px; display:block;">
+                        每次发送多少行给 AI 分析。行数越少精确度越高但调用次数越多。
+                    </small>
+                </div>
+            </details>
+
+            <button type="submit" class="btn" id="process-btn">开始角色分离</button>
+        </form>
+
+        <div id="error-box" class="alert alert-error" style="display:none;"></div>
+        <div id="success-box" class="alert alert-success" style="display:none;"></div>
+
+        <!-- 进度区域 -->
+        <div id="progress-section" style="display:none; margin: 24px 0;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+                <span id="progress-text" style="color:#888; font-size:0.9rem;">处理中...</span>
+                <span id="progress-percent" style="color:#4a9eff; font-size:0.9rem;">0%</span>
+            </div>
+            <div style="background:#1a1a1a; border-radius:8px; height:24px; overflow:hidden; border:1px solid #2a2a2a;">
+                <div id="progress-bar" style="background: linear-gradient(90deg, #4a9eff, #6ab8ff); height:100%; width:0%; transition: width 0.3s; border-radius:8px;"></div>
+            </div>
+            <div id="error-log" style="margin-top:12px; color:#ff6b6b; font-size:0.85rem; max-height:100px; overflow-y:auto;"></div>
+        </div>
+
+        <!-- 结果区域 -->
+        <div id="result-section" style="display:none;">
+            <h2 style="margin: 24px 0 8px; color: #fff;">识别结果</h2>
+            <p style="color:#888; margin-bottom:16px;" id="result-summary"></p>
+
+            <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:20px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>下载格式</label>
+                    <select id="download-format">
+                        <option value="txt">角色标注文本 (.txt)</option>
+                        <option value="srt">SRT 字幕 (.srt)</option>
+                        <option value="json">JSON (.json)</option>
+                        <option value="csv">CSV 表格 (.csv)</option>
+                    </select>
+                </div>
+                <button class="btn" id="download-btn" style="align-self:flex-end;">下载结果</button>
+            </div>
+
+            <div class="result-box" id="result-text" style="max-height:600px;"></div>
+        </div>
+    </div>
+
+    <script>
+        // 由 Jinja2 渲染的 API 路径（兼容反向代理前缀）
+        const API = {
+            process:  "{{ url_for('speaker_diarization.process') }}",
+            download: "{{ url_for('speaker_diarization.download') }}",
+        };
+
+        const form = document.getElementById("process-form");
+        const processBtn = document.getElementById("process-btn");
+        const errorBox = document.getElementById("error-box");
+        const successBox = document.getElementById("success-box");
+        const progressSection = document.getElementById("progress-section");
+        const progressBar = document.getElementById("progress-bar");
+        const progressText = document.getElementById("progress-text");
+        const progressPercent = document.getElementById("progress-percent");
+        const errorLog = document.getElementById("error-log");
+        const resultSection = document.getElementById("result-section");
+
+        let lastResults = null;
+
+        function showError(msg) {
+            errorBox.textContent = msg;
+            errorBox.style.display = "block";
+            successBox.style.display = "none";
+        }
+
+        function showSuccess(msg) {
+            successBox.textContent = msg;
+            successBox.style.display = "block";
+            errorBox.style.display = "none";
+        }
+
+        function hideMessages() {
+            errorBox.style.display = "none";
+            successBox.style.display = "none";
+        }
+
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            hideMessages();
+            resultSection.style.display = "none";
+            progressSection.style.display = "block";
+            progressBar.style.width = "0%";
+            progressPercent.textContent = "0%";
+            progressText.textContent = "正在初始化...";
+            errorLog.innerHTML = "";
+            processBtn.disabled = true;
+            processBtn.textContent = "处理中...";
+
+            try {
+                const formData = new FormData(form);
+                const resp = await fetch(API.process, {
+                    method: "POST",
+                    body: formData
+                });
+
+                if (!resp.ok) {
+                    const errData = await resp.json();
+                    showError(errData.error || "请求失败");
+                    progressSection.style.display = "none";
+                    return;
+                }
+
+                // 读取 SSE 流
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop(); // 保留未完成的行
+
+                    for (const line of lines) {
+                        if (!line.startsWith("data: ")) continue;
+                        const jsonStr = line.slice(6).trim();
+                        if (!jsonStr) continue;
+
+                        try {
+                            const event = JSON.parse(jsonStr);
+
+                            if (event.type === "progress") {
+                                const pct = Math.round(event.progress * 100);
+                                progressBar.style.width = pct + "%";
+                                progressPercent.textContent = pct + "%";
+                                progressText.textContent = event.message;
+                            } else if (event.type === "error") {
+                                const errDiv = document.createElement("div");
+                                errDiv.textContent = event.message;
+                                errorLog.appendChild(errDiv);
+                                // 进度也要更新
+                                const pct = Math.round(event.progress * 100);
+                                progressBar.style.width = pct + "%";
+                                progressPercent.textContent = pct + "%";
+                            } else if (event.type === "done") {
+                                lastResults = event.results;
+                                progressBar.style.width = "100%";
+                                progressPercent.textContent = "100%";
+                                progressText.textContent = "处理完成！";
+
+                                // 统计角色
+                                const speakers = {};
+                                event.results.forEach(r => {
+                                    speakers[r.speaker] = (speakers[r.speaker] || 0) + 1;
+                                });
+                                const speakerSummary = Object.entries(speakers)
+                                    .map(([k, v]) => `${k}(${v}句)`)
+                                    .join("、");
+
+                                document.getElementById("result-summary").textContent =
+                                    `共 ${event.total} 句 | 识别出 ${Object.keys(speakers).length} 个角色：${speakerSummary}`;
+
+                                const displayLines = event.results.map(r =>
+                                    `[${r.speaker}] ${r.text}`
+                                );
+                                document.getElementById("result-text").textContent = displayLines.join("\n");
+                                resultSection.style.display = "block";
+                                showSuccess("角色分离完成！共 " + event.total + " 句。");
+                            }
+                        } catch (parseErr) {
+                            // 忽略解析错误
+                        }
+                    }
+                }
+            } catch (err) {
+                showError("网络错误: " + err.message);
+                progressSection.style.display = "none";
+            } finally {
+                processBtn.disabled = false;
+                processBtn.textContent = "开始角色分离";
+            }
+        });
+
+        // 下载
+        document.getElementById("download-btn").addEventListener("click", () => {
+            if (!lastResults) return;
+            const format = document.getElementById("download-format").value;
+            const dlForm = document.createElement("form");
+            dlForm.method = "POST";
+            dlForm.action = API.download;
+            dlForm.style.display = "none";
+
+            const addField = (name, value) => {
+                const input = document.createElement("input");
+                input.type = "hidden";
+                input.name = name;
+                input.value = value;
+                dlForm.appendChild(input);
+            };
+
+            addField("data", JSON.stringify(lastResults));
+            addField("format", format);
+
+            document.body.appendChild(dlForm);
+            dlForm.submit();
+            document.body.removeChild(dlForm);
+        });
+    </script>
+</body>
+</html>

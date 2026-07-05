@@ -1,0 +1,14 @@
+services:
+  vibe-hub:
+    build: .
+    image: 0424godv/vibe-hub:latest
+    container_name: vibe-hub
+    ports:
+      - "5114:5000"
+    environment:
+      - FLASK_ENV=production
+    restart: unless-stopped
+
+# 如需在宿主机持久化 Cookie，取消下面的注释
+# volumes:
+#   - ./cookie.md:/app/modules/bilibili_subtitle/cookie.md

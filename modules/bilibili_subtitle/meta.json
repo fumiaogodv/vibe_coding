@@ -1,0 +1,6 @@
+{
+    "name": "Bilibili 字幕抓取",
+    "description": "输入 B 站视频链接，抓取视频字幕数据并支持下载为文件。",
+    "icon": "📺",
+    "url_prefix": "/bilibili"
+}

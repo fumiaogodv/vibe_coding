@@ -1,0 +1,20 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+.venv
+venv
+tmp/
+modules/*/tmp/
+modules/bilibili_subtitle/example/
+.vscode
+.idea
+*.swp
+*.swo
+.env
+api_key.txt
+# 排除文档，但保留 cookie.md（运行时需要）
+SOP.md
+ai_api.md
+require.md

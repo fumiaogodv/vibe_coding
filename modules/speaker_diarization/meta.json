@@ -1,0 +1,6 @@
+{
+    "name": "AI 字幕角色分离",
+    "description": "处理无对话人标注的超长字幕文件，通过 AI 上下文分析自动识别并分离不同角色。",
+    "icon": "🎙️",
+    "url_prefix": "/diarization"
+}

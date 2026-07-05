@@ -1,0 +1,6 @@
+{
+    "name": "博客字幕阅读器",
+    "description": "阅读字幕文件，支持进度记忆、喜欢标记、收藏金句并记录感悟。",
+    "icon": "📖",
+    "url_prefix": "/blog-reader"
+}

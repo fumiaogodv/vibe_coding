@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vibe Hub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Vibe Hub</h1>
+        <p class="subtitle">工具集中枢 — 选择一个功能开始使用</p>
+
+        <div class="modules-grid">
+            {% for mod in modules %}
+            <a href="{{ url_for(mod.endpoint) if mod.endpoint else mod.url }}" class="module-card">
+                <h2>{{ mod.icon }} {{ mod.name }}</h2>
+                <p>{{ mod.description }}</p>
+            </a>
+            {% endfor %}
+
+            {% if not modules %}
+            <p style="color:#666; text-align:center; grid-column: 1/-1;">
+                暂无已注册的功能模块。请在 <code>modules/</code> 目录下添加模块。
+            </p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
