@@ -7,8 +7,11 @@ services:
       - "5114:5000"
     environment:
       - FLASK_ENV=production
+      # 数据持久化目录（映射到宿主机 ./data/）
+      - TASK_TRACKER_DATA_DIR=/app/data
     restart: unless-stopped
-
-# 如需在宿主机持久化 Cookie，取消下面的注释
-# volumes:
-#   - ./cookie.md:/app/modules/bilibili_subtitle/cookie.md
+    volumes:
+      # 任务打卡数据持久化：容器重建/镜像更新后数据不丢失
+      - ./data:/app/data
+      # 如需在宿主机持久化 Bilibili Cookie，取消下面的注释
+      # - ./cookie.md:/app/modules/bilibili_subtitle/cookie.md

@@ -88,6 +88,8 @@ const API = {
     today:     "{{ url_for('task_tracker.today_tasks') }}",
     generate:  "{{ url_for('task_tracker.generate_markdown') }}",
 };
+// 构建单个任务的更新/删除 URL
+function apiTask(id) { return API.tasks + '/' + id; }
 
 // ─── 工具函数 ────────────────────────────────────────────────────────────────────
 function showToast(msg, type = 'success') {
@@ -246,8 +248,8 @@ async function loadTodayTasks() {
                            class="task-checkbox"
                            data-id="${t.id}"
                            data-name="${escapeHtml(t.name)}"
-                           onchange="onCheckChange(this)"
-                           ${!t.is_due ? 'disabled' : ''}>
+                           data-is-due="${t.is_due}"
+                           onchange="onCheckChange(this)">
                     <span class="checkmark"></span>
                     <span class="task-name">${escapeHtml(t.name)}</span>
                     ${t.is_due ? '<span class="task-day-badge">' + dayInfo + '</span>' : '<span class="task-skip-badge">⏳ 非今日</span>'}
@@ -266,15 +268,49 @@ async function loadTodayTasks() {
     }
 }
 
-function onCheckChange(cb) {
-    const id = cb.dataset.id;
-    const row = document.getElementById('detail-row-' + id);
+async function onCheckChange(cb) {
+    const id = parseInt(cb.dataset.id);
+    const isDue = cb.dataset.isDue === 'True' || cb.dataset.isDue === 'true';
+
     if (cb.checked) {
-        row.style.display = 'block';
-        setTimeout(() => { document.getElementById('detail-' + id).focus(); }, 100);
+        // 如果勾选了非今日任务，自动将起始日重置为今天（无惩罚）
+        if (!isDue) {
+            try {
+                await apiFetch(apiTask(id), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ start_date: todayISO() }),
+                });
+                showToast('📅 任务周期已重置为从今天开始');
+                // 原地更新 UI：非今日 → 今日，无需整页重刷
+                const taskItem = cb.closest('.task-item');
+                if (taskItem) {
+                    taskItem.classList.remove('not-due');
+                    taskItem.classList.add('due');
+                    const badge = taskItem.querySelector('.task-skip-badge');
+                    if (badge) {
+                        badge.className = 'task-day-badge';
+                        badge.textContent = '第 1 天';
+                    }
+                }
+                cb.dataset.isDue = 'True';
+            } catch (e) {
+                showToast('❌ ' + e.message, 'error');
+                cb.checked = false;
+                return;
+            }
+        }
+        const row = document.getElementById('detail-row-' + id);
+        if (row) {
+            row.style.display = 'block';
+            const input = document.getElementById('detail-' + id);
+            if (input) setTimeout(() => { input.focus(); }, 100);
+        }
     } else {
-        row.style.display = 'none';
-        document.getElementById('detail-' + id).value = '';
+        const row = document.getElementById('detail-row-' + id);
+        if (row) row.style.display = 'none';
+        const input = document.getElementById('detail-' + id);
+        if (input) input.value = '';
     }
 }
 

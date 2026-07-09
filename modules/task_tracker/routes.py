@@ -15,7 +15,10 @@ bp = Blueprint(
     static_folder="static",
 )
 
-DATA_FILE = os.path.join(os.path.dirname(__file__), "data.json")
+# 数据存放目录：Docker 中通过环境变量指向挂载卷；本地开发默认存模块目录
+DATA_DIR = os.environ.get("TASK_TRACKER_DATA_DIR", os.path.dirname(__file__))
+os.makedirs(DATA_DIR, exist_ok=True)
+DATA_FILE = os.path.join(DATA_DIR, "data.json")
 
 
 # ─── 数据读写工具 ────────────────────────────────────────────────────────────────

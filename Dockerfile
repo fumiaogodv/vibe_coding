@@ -12,6 +12,9 @@ COPY static/ static/
 COPY templates/ templates/
 COPY modules/ modules/
 
+# 创建持久化数据目录（挂载卷使用）
+RUN mkdir -p /app/data
+
 # 创建 tmp 目录
 RUN mkdir -p tmp
 
